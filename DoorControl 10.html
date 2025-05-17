@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SHB Door Controller</title>
+    <style>
+        :root {
+            --primary: #6366f1;
+            --success: #22c55e;
+            --danger: #ef4444;
+            --warning: #eab308;
+            --background: #0f172a;
+            --surface: #1e293b;
+        }
+
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            margin: 0;
+            padding: 40px;
+            background: var(--background);
+            color: white;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 4rem;
+        }
+
+        .header h1 {
+            font-size: 5rem;
+        }
+
+        #status {
+            font-size: 4rem;
+            margin: 3rem 0;
+            background: linear-gradient(45deg, #6366f1, #8b5cf6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            font-weight: 700;
+            text-align: center;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 3rem;
+            margin: 3rem 0;
+        }
+
+        .control-btn {
+            padding: 3rem 6rem;
+            font-size: 3rem;
+            border: none;
+            border-radius: 2rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            backdrop-filter: blur(10px);
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 6px 10px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        .control-btn:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 20px -3px rgba(0, 0, 0, 0.3);
+        }
+
+        #scanBtn {
+            background: var(--primary);
+            font-size: 2.8rem;
+            padding: 2.5rem 5rem;
+        }
+
+        #disconnectBtn {
+            background: var(--danger);
+            font-size: 2.8rem;
+            padding: 2.5rem 5rem;
+        }
+
+        #openBtn { 
+            background: var(--success);
+            padding: 3rem 6rem;
+        }
+        #halfBtn { 
+            background: var(--warning);
+            padding: 3rem 6rem;
+        }
+        #closeBtn { 
+            background: var(--primary);
+            padding: 3rem 6rem;
+        }
+        #stopBtn { 
+            background: var(--danger);
+            padding: 8rem 8rem;
+            font-size: 4rem;
+        }
+
+        .controls {
+            display: grid;
+            gap: 2.5rem;
+            margin-top: 4rem;
+            width: 100%;
+            max-width: 1200px;
+        }
+
+        .connected-door {
+            font-size: 3.5rem;
+            text-align: center;
+            color: #94a3b8;
+            margin: 2rem 0;
+        }
+
+        @media (max-width: 768px) {
+            .control-btn {
+                padding: 2rem 3rem;
+                font-size: 2.2rem;
+            }
+            
+            #stopBtn {
+                padding: 3rem 6rem;
+                font-size: 2.8rem;
+            }
+
+            .header h1 {
+                font-size: 4rem;
+            }
+
+            #status {
+                font-size: 3rem;
+            }
+
+            .connected-door {
+                font-size: 2.5rem;
+            }
+        }
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="header">
+        <h1>SHB Door Control</h1>
+        <div class="connected-door" id="doorStatus">Not connected</div>
+    </div>
+
+    <div class="button-group">
+        <button class="control-btn" id="scanBtn" onclick="scanDoors()">SCAN DOORS</button>
+        <button class="control-btn" id="disconnectBtn" onclick="disconnect()" disabled>DISCONNECT</button>
+    </div>
+
+    <div class="controls">
+        <button class="control-btn" id="openBtn" onclick="sendCommand('O\n')">OPEN</button>
+        <button class="control-btn" id="halfBtn" onclick="sendCommand('H\n')">HALF</button>
+        <button class="control-btn" id="closeBtn" onclick="sendCommand('C\n')">CLOSE</button>
+        <button class="control-btn" id="stopBtn" onclick="sendCommand('S\n')">EMERGENCY STOP</button>
+    </div>
+
+    <div id="status"></div>
+
+    <script>
+        const UART_SERVICE_UUID = '0000ffe0-0000-1000-8000-00805f9b34fb';
+        const UART_CHARACTERISTIC_UUID = '0000ffe1-0000-1000-8000-00805f9b34fb';
+        let currentDevice = null;
+        let currentCharacteristic = null;
+        let connectedDoor = null;
+
+        async function scanDoors() {
+            try {
+                showStatus('Scanning for doors...');
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [{ namePrefix: 'D' }],
+                    optionalServices: [UART_SERVICE_UUID]
+                });
+
+                // Strict validation for D1-D99
+                if (!/^D([1-9]|[1-9][0-9])$/.test(device.name)) {
+                    showStatus('Only D1-D99 doors supported', true);
+                    return;
+                }
+
+                connectToDoor(device);
+            } catch(err) {
+                if (err.name !== 'NotFoundError') {
+                    showStatus(`Error: ${err.message}`, true);
+                } else {
+                    showStatus('No Bluetooth devices found', true);
+                }
+            }
+        }
+
+        async function connectToDoor(device) {
+            try {
+                showStatus(`Connecting to ${device.name}...`);
+                if (currentDevice?.gatt.connected) {
+                    await currentDevice.gatt.disconnect();
+                }
+
+                currentDevice = device;
+                const server = await currentDevice.gatt.connect();
+                const service = await server.getPrimaryService(UART_SERVICE_UUID);
+                currentCharacteristic = await service.getCharacteristic(UART_CHARACTERISTIC_UUID);
+
+                connectedDoor = device.name;
+                updateUI();
+                showStatus(`Connected to ${connectedDoor}`);
+
+                currentDevice.addEventListener('gattserverdisconnected', () => {
+                    connectedDoor = null;
+                    updateUI();
+                    showStatus('Disconnected', true);
+                });
+
+            } catch(err) {
+                showStatus(`Connection failed: ${err.message}`, true);
+            }
+        }
+
+        async function disconnect() {
+            if (currentDevice?.gatt.connected) {
+                await currentDevice.gatt.disconnect();
+            }
+            connectedDoor = null;
+            updateUI();
+            showStatus('Disconnected', true);
+        }
+
+        async function sendCommand(command) {
+            if (!currentCharacteristic) {
+                showStatus('Not connected to any door', true);
+                return;
+            }
+
+            try {
+                await currentCharacteristic.writeValue(new TextEncoder().encode(command));
+                showStatus(`Sent: ${command.trim()} command`);
+            } catch(err) {
+                showStatus(`Send failed: ${err.message}`, true);
+            }
+        }
+
+        function updateUI() {
+            document.getElementById('doorStatus').textContent = 
+                connectedDoor ? `Connected to: ${connectedDoor}` : "Not connected";
+            document.getElementById('disconnectBtn').disabled = !connectedDoor;
+        }
+
+        function showStatus(message, isError = false) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.innerHTML = message;
+            statusDiv.style.color = isError ? '#ef4444' : '#22c55e';
+        }
+    </script>
+</body>
+</html>
