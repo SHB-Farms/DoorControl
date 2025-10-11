@@ -1,350 +1,273 @@
-<!DOCTYPE html>
-<html lang="en">
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>SHB Door Control v1.3</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <title>SHB Door Controller</title>
     <style>
         :root {
             --primary: #6366f1;
-            --primary-light: #818cf8;
             --success: #22c55e;
-            --success-light: #4ade80;
             --danger: #ef4444;
-            --danger-light: #f87171;
             --warning: #eab308;
-            --warning-light: #facc15;
             --background: #0f172a;
-            --surface: rgba(30, 41, 59, 0.9);
-            --text: #f1f5f9;
-            --text-secondary: #94a3b8;
-            --border: rgba(148, 163, 184, 0.2);
-        }
-
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            font-family: 'Inter', system-ui, sans-serif;
-            -webkit-tap-highlight-color: transparent;
+            --surface: #1e293b;
         }
 
         body {
-            background: linear-gradient(135deg, #0c1220, #0f172a);
-            color: var(--text);
+            font-family: 'Inter', system-ui, sans-serif;
+            margin: 0;
+            padding: 40px;
+            background: var(--background);
+            color: white;
             min-height: 100vh;
-            padding: 1rem;
             display: flex;
             flex-direction: column;
             align-items: center;
-            position: relative;
-            overflow: hidden;
-            height: 100vh;
         }
 
-        body::before {
-            content: "";
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: radial-gradient(circle at 10% 20%, rgba(99, 102, 241, 0.1) 0%, transparent 20%),
-                        radial-gradient(circle at 90% 80%, rgba(34, 197, 94, 0.1) 0%, transparent 20%);
-            z-index: -1;
-        }
-
-        .container {
-            width: 100%;
-            max-width: 500px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            height: 100%;
-            padding: 1rem 0;
-        }
-
-        /* Header */
         .header {
             text-align: center;
-            margin-bottom: 1.2rem;
-            width: 100%;
-            padding: 0.8rem;
+            margin-bottom: 4rem;
         }
 
         .header h1 {
-            font-size: 1.8rem;
-            font-weight: 700;
-            background: linear-gradient(45deg, var(--primary), var(--primary-light));
+            font-size: 5rem;
+        }
+
+        #status {
+            font-size: 4rem;
+            margin: 3rem 0;
+            background: linear-gradient(45deg, #6366f1, #8b5cf6);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
-            margin-bottom: 0.3rem;
+            font-weight: 700;
+            text-align: center;
         }
 
-        /* Connection Status */
-        .connection-status {
+        .button-group {
             display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 0.8rem;
-            margin: 0.8rem 0;
-            padding: 0.8rem 1.2rem;
-            background: var(--surface);
-            border-radius: 1.2rem;
-            backdrop-filter: blur(10px);
-            width: 100%;
-            border: 1px solid var(--border);
-            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+            gap: 3rem;
+            margin: 3rem 0;
         }
 
-        .status-indicator {
-            width: 14px;
-            height: 14px;
-            border-radius: 50%;
-            background: var(--danger);
-            box-shadow: 0 0 8px var(--danger);
-        }
-
-        .status-indicator.connected {
-            background: var(--success);
-            box-shadow: 0 0 8px var(--success);
-        }
-
-        .status-text {
-            font-size: 1rem;
-            font-weight: 500;
-            color: var(--text-secondary);
-        }
-
-        .status-text.connected {
-            color: var(--success-light);
-        }
-
-        .door-name {
-            font-weight: 600;
-            color: var(--text);
-        }
-
-        /* Action Buttons */
-        .action-buttons {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            grid-template-rows: repeat(3, 1fr);
-            gap: 0.8rem;
-            width: 100%;
-            height: 45vh;
-            margin: 1rem 0;
-        }
-
-        .action-btn {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 0.5rem;
-            border-radius: 1.2rem;
-            background: var(--surface);
-            border: 1px solid var(--border);
-            backdrop-filter: blur(10px);
+        .control-btn {
+            padding: 3rem 6rem;
+            font-size: 3rem;
+            border: none;
+            border-radius: 2rem;
             cursor: pointer;
             transition: all 0.2s ease;
-            position: relative;
-            overflow: hidden;
-            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
-            padding: 0.5rem;
+            backdrop-filter: blur(10px);
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 6px 10px -1px rgba(0, 0, 0, 0.1);
         }
 
-        .action-btn::before {
-            content: "";
-            position: absolute;
+        .control-btn:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 20px -3px rgba(0, 0, 0, 0.3);
+        }
+
+        #scanBtn {
+            background: var(--primary);
+            font-size: 2.8rem;
+            padding: 2.5rem 5rem;
+        }
+
+        #disconnectBtn {
+            background: var(--danger);
+            font-size: 2.8rem;
+            padding: 2.5rem 5rem;
+        }
+
+        #openBtn { 
+            background: var(--success);
+            padding: 3rem 6rem;
+        }
+        #halfBtn { 
+            background: var(--warning);
+            padding: 3rem 6rem;
+        }
+        #closeBtn { 
+            background: var(--primary);
+            padding: 3rem 6rem;
+        }
+        #stopBtn { 
+            background: var(--danger);
+            padding: 8rem 8rem;
+            font-size: 8rem;
+        }
+
+        .controls {
+            display: grid;
+            gap: 2.5rem;
+            margin-top: 4rem;
+            width: 100%;
+            max-width: 1200px;
+        }
+
+        .connected-door {
+            font-size: 3.5rem;
+            text-align: center;
+            color: #94a3b8;
+            margin: 2rem 0;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), transparent);
-            opacity: 0;
-            transition: opacity 0.2s ease;
-        }
-
-        .action-btn:active {
-            transform: scale(0.97);
-        }
-
-        .action-btn i {
-            font-size: 2.2rem;
-        }
-
-        .action-btn .label {
-            font-size: 1.1rem;
-            font-weight: 600;
-        }
-
-        #openBtn {
-            background: linear-gradient(135deg, var(--success), var(--success-light));
-        }
-
-        #halfBtn {
-            background: linear-gradient(135deg, var(--warning), var(--warning-light));
-        }
-
-        #closeBtn {
-            background: linear-gradient(135deg, var(--primary), var(--primary-light));
-        }
-
-        #stopBtn {
-            grid-column: span 2;
-            background: linear-gradient(135deg, var(--danger), var(--danger-light));
-        }
-
-        #stopBtn i {
-            font-size: 2.5rem;
-        }
-
-        #stopBtn .label {
-            font-size: 1.3rem;
-        }
-
-        /* Connection Controls */
-        .connection-controls {
-            display: flex;
-            gap: 0.8rem;
-            margin: 0.8rem 0;
-            width: 100%;
-        }
-
-        .control-btn {
-            flex: 1;
-            display: flex;
+            background: rgba(0, 0, 0, 0.7);
             align-items: center;
             justify-content: center;
-            gap: 0.5rem;
-            padding: 0.9rem;
-            border-radius: 1.2rem;
-            border: none;
-            font-size: 1rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            backdrop-filter: blur(10px);
-            color: white;
-            border: 1px solid var(--border);
-            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+            z-index: 1000;
         }
 
-        .control-btn:active {
-            transform: scale(0.97);
-        }
-
-        #scanBtn {
-            background: linear-gradient(135deg, var(--primary), var(--primary-light));
-        }
-
-        #disconnectBtn {
-            background: linear-gradient(135deg, var(--danger), var(--danger-light));
-        }
-
-        #disconnectBtn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            transform: none !important;
-        }
-
-        /* Status Panel */
-        .status-panel {
+        .modal-content {
             background: var(--surface);
-            border-radius: 1.2rem;
+            padding: 2rem;
+            border-radius: 1rem;
+            text-align: center;
+            width: 90%;
+            max-width: 400px;
+            box-shadow: 0 6px 10px -1px rgba(0, 0, 0, 0.3);
+        }
+
+        .modal-content input {
             padding: 1rem;
-            margin-top: 0.8rem;
-            width: 100%;
-            backdrop-filter: blur(10px);
-            border: 1px solid var(--border);
-            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
-            min-height: 50px;
-        }
-
-        #status {
-            font-size: 0.9rem;
-            font-weight: 500;
-            color: var(--text);
+            font-size: 1.8rem;
+            margin: 1rem 0;
+            width: 80%;
+            border: 2px solid var(--primary);
+            border-radius: 0.5rem;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
             text-align: center;
-            transition: color 0.2s ease;
-            padding: 0.3rem;
         }
 
-        /* Footer */
-        .footer {
-            margin-top: 0.8rem;
-            text-align: center;
-            color: var(--text-secondary);
-            font-size: 0.7rem;
-            padding: 0.5rem;
-            width: 100%;
+        .modal-content button {
+            padding: 1rem 2rem;
+            font-size: 1.6rem;
+            margin: 0.5rem;
+            border: none;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            background: var(--primary);
+            color: white;
         }
 
-        /* Animation */
-        @keyframes pulse {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.05); }
-            100% { transform: scale(1); }
+        .modal-content button.cancel {
+            background: var(--danger);
         }
 
-        .pulse {
-            animation: pulse 0.5s;
-        }
+        @media (max-width: 768px) {
+            .control-btn {
+                padding: 2rem 3rem;
+                font-size: 2.2rem;
+            }
+            
+            #stopBtn {
+                padding: 3rem 6rem;
+                font-size: 2.8rem;
+            }
 
-        /* Active state for buttons */
-        .active {
-            transform: scale(0.95);
-            box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.3);
+            .header h1 {
+                font-size: 4rem;
+            }
+
+            #status {
+                font-size: 3rem;
+            }
+
+            .connected-door {
+                font-size: 2.5rem;
+            }
+
+            .modal-content {
+                padding: 1.5rem;
+            }
+
+            .modal-content input {
+                font-size: 1.5rem;
+            }
+
+            .modal-content button {
+                font-size: 1.4rem;
+            }
         }
     </style>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>SHB DOOR CONTROL v1.3</h1>
-            <div class="connection-status">
-                <div class="status-indicator" id="statusIndicator"></div>
-                <div class="status-text" id="doorStatus">Not connected</div>
-            </div>
-        </div>
+    <div class="header">
+        <h1>SHB Door Control v1.7</h1>
+        <div class="connected-door" id="doorStatus">Not connected</div>
+    </div>
 
-        <div class="connection-controls">
-            <button class="control-btn" id="scanBtn" onclick="scanDoors()">
-                <i class="fas fa-bluetooth-b"></i> SCAN
-            </button>
-            <button class="control-btn" id="disconnectBtn" onclick="disconnect()" disabled>
-                <i class="fas fa-unlink"></i> DISCONNECT
-            </button>
-        </div>
+    <div class="button-group">
+        <button class="control-btn" id="scanBtn" onclick="scanDoors()">SCAN DOORS</button>
+        <button class="control-btn" id="disconnectBtn" onclick="disconnect()" disabled>DISCONNECT</button>
+    </div>
 
-        <div class="action-buttons">
-            <div class="action-btn" id="openBtn" onclick="sendCommand('O\n')">
-                <i class="fas fa-door-open"></i>
-                <div class="label">OPEN</div>
-            </div>
-            <div class="action-btn" id="halfBtn" onclick="sendCommand('H\n')">
-                <i class="fas fa-door-closed"></i>
-                <div class="label">HALF</div>
-            </div>
-            <div class="action-btn" id="closeBtn" onclick="sendCommand('C\n')">
-                <i class="fas fa-door-closed"></i>
-                <div class="label">CLOSE</div>
-            </div>
-            <div class="action-btn" id="stopBtn" onclick="sendCommand('S\n')">
-                <i class="fas fa-stop-circle"></i>
-                <div class="label">STOP</div>
-            </div>
-        </div>
+    <div class="controls">
+        <button class="control-btn" id="openBtn" onclick="sendCommand('O\n')">OPEN</button>
+        <button class="control-btn" id="halfBtn" onclick="sendCommand('H\n')">HALF</button>
+        <button class="control-btn" id="closeBtn" onclick="sendCommand('C\n')">CLOSE</button>
+        <button class="control-btn" id="stopBtn" onclick="sendCommand('S\n')"> STOP </button>
+    </div>
 
-        <div class="status-panel">
-            <div id="status">Ready to connect...</div>
-        </div>
+    <div id="status"></div>
 
-        <div class="footer">
-            SHB Door Systems &copy; 2025 | Secure Access Control
+    <div class="modal" id="passcodeModal">
+        <div class="modal-content">
+            <h2 id="modalTitle">Enter Passcode</h2>
+            <input type="password" id="passcodeInput" maxlength="4" placeholder="Enter 4-digit code">
+            <div>
+                <button onclick="verifyPasscode()">Submit</button>
+                <button class="cancel" onclick="closePasscodeModal()">Cancel</button>
+            </div>
         </div>
     </div>
 
@@ -354,6 +277,59 @@
         let currentDevice = null;
         let currentCharacteristic = null;
         let connectedDoor = null;
+        let selectedDevice = null;
+
+        // ====================== PASSCODE CONFIGURATION ======================
+        // EASY TO EDIT: Configure your door passcodes here
+        // Use format: 'DoorName': 'Passcode' or 'DoorName': null for no passcode
+        const DOOR_PASSCODES = {
+            // Examples:
+            'D1': '1234',    // Door D1 requires passcode 1234
+            'D2': null,      // Door D2 has no passcode (free access)
+            'D3': '4045',    // Door D3 requires passcode 4045
+            'D4': null,      // Door D4 has no passcode
+            'D5': '9999',    // Door D5 requires passcode 9999
+            // Add more doors here:
+            // 'D6': '0000', // Uncomment and modify as needed
+            // 'D7': null,   // Uncomment and modify as needed
+        };
+
+        // Default behavior for doors not listed above:
+        // Set to a passcode string like '2025' to require passcode by default
+        // Set to null to allow free access by default
+        const DEFAULT_PASSCODE = null;
+
+        function showPasscodeModal(device) {
+            selectedDevice = device;
+            const doorName = device.name || 'Unknown';
+            document.getElementById('modalTitle').textContent = `Enter Passcode for ${doorName}`;
+            document.getElementById('passcodeModal').style.display = 'flex';
+            document.getElementById('passcodeInput').value = '';
+            document.getElementById('passcodeInput').focus();
+        }
+
+        function closePasscodeModal() {
+            document.getElementById('passcodeModal').style.display = 'none';
+            selectedDevice = null;
+            showStatus('Passcode entry cancelled');
+        }
+
+        function verifyPasscode() {
+            const input = document.getElementById('passcodeInput').value;
+            const doorName = selectedDevice?.name || 'Unknown';
+            const correctPasscode = DOOR_PASSCODES[doorName] !== undefined ? DOOR_PASSCODES[doorName] : DEFAULT_PASSCODE;
+
+            if (correctPasscode === null) {
+                document.getElementById('passcodeModal').style.display = 'none';
+                connectToDoor(selectedDevice);
+            } else if (input === correctPasscode) {
+                document.getElementById('passcodeModal').style.display = 'none';
+                connectToDoor(selectedDevice);
+            } else {
+                showStatus('Incorrect passcode', true);
+                document.getElementById('passcodeInput').value = '';
+            }
+        }
 
         async function scanDoors() {
             try {
@@ -365,11 +341,17 @@
 
                 // Strict validation for D1-D99
                 if (!/^D([1-9]|[1-9][0-9])$/.test(device.name)) {
-                    showStatus('Error: Only D1-D99 doors supported', true);
+                    showStatus('Only D1-D99 doors supported', true);
                     return;
                 }
 
-                connectToDoor(device);
+                // Check if the door requires a passcode
+                const passcode = DOOR_PASSCODES[device.name] !== undefined ? DOOR_PASSCODES[device.name] : DEFAULT_PASSCODE;
+                if (passcode === null) {
+                    connectToDoor(device);
+                } else {
+                    showPasscodeModal(device);
+                }
             } catch(err) {
                 if (err.name !== 'NotFoundError') {
                     showStatus(`Error: ${err.message}`, true);
@@ -417,64 +399,29 @@
 
         async function sendCommand(command) {
             if (!currentCharacteristic) {
-                showStatus('Error: Not connected to any door', true);
+                showStatus('Not connected to any door', true);
                 return;
             }
 
             try {
-                // Add visual feedback for the button press
-                let btnId = '';
-                switch(command.trim()) {
-                    case 'O': btnId = 'openBtn'; break;
-                    case 'H': btnId = 'halfBtn'; break;
-                    case 'C': btnId = 'closeBtn'; break;
-                    case 'S': btnId = 'stopBtn'; break;
-                }
-                
-                if(btnId) {
-                    const btn = document.getElementById(btnId);
-                    btn.classList.add('active');
-                    setTimeout(() => btn.classList.remove('active'), 200);
-                }
-
                 await currentCharacteristic.writeValue(new TextEncoder().encode(command));
-                showStatus(`Command sent: ${command.trim()}`);
-                
+                showStatus(`Sent: ${command.trim()} command`);
             } catch(err) {
                 showStatus(`Send failed: ${err.message}`, true);
             }
         }
 
         function updateUI() {
-            const statusText = document.getElementById('doorStatus');
-            const statusIndicator = document.getElementById('statusIndicator');
-            const disconnectBtn = document.getElementById('disconnectBtn');
-            
-            if (connectedDoor) {
-                statusText.innerHTML = `Connected: <span class="door-name">${connectedDoor}</span>`;
-                statusText.classList.add('connected');
-                statusIndicator.classList.add('connected');
-                disconnectBtn.disabled = false;
-            } else {
-                statusText.textContent = 'Not connected';
-                statusText.classList.remove('connected');
-                statusIndicator.classList.remove('connected');
-                disconnectBtn.disabled = true;
-            }
+            document.getElementById('doorStatus').textContent = 
+                connectedDoor ? `Connected to: ${connectedDoor}` : "Not connected";
+            document.getElementById('disconnectBtn').disabled = !connectedDoor;
         }
 
         function showStatus(message, isError = false) {
             const statusDiv = document.getElementById('status');
-            statusDiv.textContent = message;
-            statusDiv.style.color = isError ? '#f87171' : '#4ade80';
+            statusDiv.innerHTML = message;
+            statusDiv.style.color = isError ? '#ef4444' : '#22c55e';
         }
-
-        // Initialize
-        document.addEventListener('DOMContentLoaded', () => {
-            showStatus('Ready to connect...');
-            // Simulate mobile height
-            document.documentElement.style.setProperty('--vh', `${window.innerHeight * 0.01}px`);
-        });
     </script>
 </body>
 </html>
